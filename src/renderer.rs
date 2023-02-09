@@ -6,6 +6,8 @@ use winit::{
     window::Window,
 };
 
+use crate::Scene;
+
 #[derive(Debug, Clone)]
 pub struct WGPURendererOption {
     pub power_preference: wgpu::PowerPreference,
@@ -128,7 +130,7 @@ impl WGPURenderer {
         }
     }
 
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(&mut self, scene: &Scene) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -147,12 +149,7 @@ impl WGPURenderer {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(scene.background),
                         store: true,
                     },
                 })],
@@ -166,7 +163,7 @@ impl WGPURenderer {
         Ok(())
     }
 
-    pub fn handle_event(&mut self, event: &Event<()>) -> ControlFlow {
+    pub fn handle_event(&mut self, event: &Event<()>, scene: &Scene) -> ControlFlow {
         match event {
             Event::WindowEvent { event, window_id } if window_id == &self.window.id() => {
                 match event {
@@ -190,7 +187,7 @@ impl WGPURenderer {
                 }
             }
             Event::RedrawRequested(window_id) if window_id == &self.window.id() => {
-                match self.render() {
+                match self.render(scene) {
                     Ok(_) => {}
                     Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                         self.resize(self.surface_desc.width, self.surface_desc.height);
