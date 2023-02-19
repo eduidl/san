@@ -1,6 +1,8 @@
-#[derive(Debug)]
+use crate::mesh::MeshBase;
+
 pub struct Scene {
     background: wgpu::Color,
+    meshes: Vec<Option<Box<dyn MeshBase>>>,
 }
 
 impl Scene {
@@ -9,7 +11,7 @@ impl Scene {
     }
 
     pub(crate) fn render(&self, view: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
-        let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view,
@@ -21,6 +23,10 @@ impl Scene {
             })],
             depth_stencil_attachment: None,
         });
+
+        for mesh in self.meshes.iter().flatten() {
+            mesh.render(&mut render_pass);
+        }
     }
 
     pub fn set_background<T>(&mut self, background: T)
@@ -35,6 +41,7 @@ impl Default for Scene {
     fn default() -> Self {
         Self {
             background: wgpu::Color::WHITE,
+            meshes: Vec::new(),
         }
     }
 }

@@ -1,3 +1,5 @@
+pub mod mesh;
+
 pub mod primitive;
 
 mod renderer;
