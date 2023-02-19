@@ -1,4 +1,6 @@
+#[warn(clippy::all)]
 pub mod mesh;
+pub use mesh::Mesh;
 
 pub mod primitive;
 
