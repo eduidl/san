@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::PathBuf;
 
 use winit::{
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
@@ -12,7 +12,7 @@ use crate::Scene;
 pub struct WGPURendererOption {
     pub power_preference: wgpu::PowerPreference,
     pub device_limits: wgpu::Limits,
-    pub trace: bool,
+    pub trace: Option<PathBuf>,
 }
 
 impl Default for WGPURendererOption {
@@ -24,7 +24,7 @@ impl Default for WGPURendererOption {
             } else {
                 wgpu::Limits::default()
             },
-            trace: false,
+            trace: None,
         }
     }
 }
@@ -44,8 +44,11 @@ impl WGPURendererOption {
         }
     }
 
-    pub fn trace(self, trace: bool) -> Self {
-        Self { trace, ..self }
+    pub fn with_trace(self, trace: PathBuf) -> Self {
+        Self {
+            trace: Some(trace),
+            ..self
+        }
     }
 }
 
@@ -81,11 +84,7 @@ impl WGPURenderer {
                     features: wgpu::Features::empty(),
                     limits: option.device_limits,
                 },
-                if option.trace {
-                    Some(Path::new("trace"))
-                } else {
-                    None
-                },
+                option.trace.as_deref(),
             )
             .await
             .unwrap();
