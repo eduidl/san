@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use winit::{
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
@@ -55,7 +55,7 @@ impl WGPURendererOption {
 #[derive(Debug)]
 pub struct WGPURenderer {
     window: Window,
-    device: wgpu::Device,
+    device: Arc<wgpu::Device>,
     queue: wgpu::Queue,
     surface: wgpu::Surface,
     surface_desc: wgpu::SurfaceConfiguration,
@@ -110,11 +110,15 @@ impl WGPURenderer {
 
         Self {
             window,
-            device,
+            device: Arc::new(device),
             queue,
             surface,
             surface_desc,
         }
+    }
+
+    pub fn create_scene(&self) -> Scene {
+        Scene::new(Arc::clone(&self.device), self.surface_desc.format)
     }
 
     pub fn window(&self) -> &Window {

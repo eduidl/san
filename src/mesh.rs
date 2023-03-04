@@ -1,29 +1,48 @@
-use std::{any::Any, fmt::Debug, marker::PhantomData};
+use std::{any::Any, marker::PhantomData, sync::Arc};
 
-use crate::scene::SceneID;
+use crate::{
+    common::AsAny,
+    geometry::{Geometry, GeometryGpuData},
+    gpu::GpuCached,
+    material::{Material, MaterialGpuData},
+    scene::SceneID,
+};
 
-pub trait MeshBase: Any + Debug {
-    fn render(&self, render_pass: &mut wgpu::RenderPass);
-
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
+pub trait MeshBase: AsAny {
+    fn gpu_data(
+        &self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+    ) -> (Arc<GeometryGpuData>, Arc<MaterialGpuData>);
 }
 
-#[derive(Debug)]
-pub struct Mesh {}
+pub struct Mesh<M>
+where
+    M: Material,
+{
+    geometry: GpuCached<Geometry>,
+    material: GpuCached<M>,
+}
 
-impl Mesh {
-    #[allow(clippy::new_without_default)]
-    pub const fn new() -> Self {
-        Self {}
+impl<M> Mesh<M>
+where
+    M: Material,
+{
+    pub fn new(geometry: Geometry, material: M) -> Self
+    where
+        M: Material,
+    {
+        Self {
+            geometry: GpuCached::new(geometry),
+            material: GpuCached::new(material),
+        }
     }
 }
 
-impl MeshBase for Mesh {
-    fn render(&self, _render_pass: &mut wgpu::RenderPass) {
-        println!("TODO")
-    }
-
+impl<M> AsAny for Mesh<M>
+where
+    M: Material + 'static,
+{
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -33,10 +52,26 @@ impl MeshBase for Mesh {
     }
 }
 
+impl<M> MeshBase for Mesh<M>
+where
+    M: Material + 'static,
+{
+    fn gpu_data(
+        &self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+    ) -> (Arc<GeometryGpuData>, Arc<MaterialGpuData>) {
+        (
+            self.geometry.to_gpu(device, format),
+            self.material.to_gpu(device, format),
+        )
+    }
+}
+
 pub struct MeshID<M> {
-    pub scene_id: SceneID,
-    pub index: usize,
-    _phantom: PhantomData<M>,
+    pub(crate) scene_id: SceneID,
+    pub(crate) index: usize,
+    pub(crate) _phantom: PhantomData<M>,
 }
 
 impl<M> MeshID<M> {
@@ -45,6 +80,32 @@ impl<M> MeshID<M> {
             scene_id,
             index,
             _phantom: Default::default(),
+        }
+    }
+}
+
+pub trait DrawMesh<'b> {
+    fn draw_mesh(&mut self, geometry: &'b GeometryGpuData, material: &'b MaterialGpuData);
+}
+
+impl<'a, 'b> DrawMesh<'b> for wgpu::RenderPass<'a>
+where
+    'b: 'a,
+{
+    fn draw_mesh(&mut self, geometry: &'b GeometryGpuData, material: &'b MaterialGpuData) {
+        self.set_pipeline(&material.pipeline);
+
+        self.set_vertex_buffer(0, geometry.vertices.slice(..));
+        if let Some(ref indices) = geometry.indices {
+            self.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+        }
+
+        self.set_bind_group(0, &material.bind_group, &[]);
+
+        if geometry.indices.is_some() {
+            self.draw_indexed(0..geometry.indices_len, 0, 0..1);
+        } else {
+            self.draw(0..geometry.vertices_len, 0..1);
         }
     }
 }

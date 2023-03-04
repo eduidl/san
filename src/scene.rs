@@ -1,6 +1,9 @@
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::{
+    atomic::{AtomicU16, Ordering},
+    Arc,
+};
 
-use crate::mesh::{MeshBase, MeshID};
+use crate::mesh::{DrawMesh, MeshBase, MeshID};
 
 pub(crate) type SceneID = u16;
 
@@ -8,17 +11,33 @@ static SCENE_COUNTER: AtomicU16 = AtomicU16::new(0);
 
 pub struct Scene {
     id: SceneID,
+    device: Arc<wgpu::Device>,
+    format: wgpu::TextureFormat,
     background: wgpu::Color,
     meshes: Vec<Option<Box<dyn MeshBase>>>,
     mesh_recycle_ids: Vec<usize>,
 }
 
 impl Scene {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(device: Arc<wgpu::Device>, format: wgpu::TextureFormat) -> Self {
+        Self {
+            id: SCENE_COUNTER.fetch_add(1, Ordering::Relaxed),
+            device,
+            format,
+            background: wgpu::Color::WHITE,
+            meshes: Vec::new(),
+            mesh_recycle_ids: Vec::new(),
+        }
     }
 
     pub(crate) fn render(&self, view: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
+        let gpu_data: Vec<_> = self
+            .meshes
+            .iter()
+            .flatten()
+            .map(|mesh| (mesh.gpu_data(&self.device, self.format)))
+            .collect();
+
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -32,8 +51,8 @@ impl Scene {
             depth_stencil_attachment: None,
         });
 
-        for mesh in self.meshes.iter().flatten() {
-            mesh.render(&mut render_pass);
+        for (geo, mat) in gpu_data.iter() {
+            render_pass.draw_mesh(geo, mat);
         }
     }
 
@@ -48,19 +67,20 @@ impl Scene {
         self.meshes.len() - self.mesh_recycle_ids.len()
     }
 
-    pub fn add_mesh<T, M>(&mut self, mesh: T) -> MeshID<M>
+    pub fn add_mesh<M>(&mut self, mesh: M) -> MeshID<M>
     where
-        T: Into<Box<M>>,
-        M: MeshBase,
+        M: MeshBase + 'static,
     {
+        let mesh = Some(Box::new(mesh) as Box<dyn MeshBase>);
+
         let index = match self.mesh_recycle_ids.pop() {
             Some(index) => {
                 debug_assert!(self.meshes[index].is_none());
-                self.meshes[index] = Some(mesh.into());
+                self.meshes[index] = mesh;
                 index
             }
             None => {
-                self.meshes.push(Some(mesh.into()));
+                self.meshes.push(mesh);
                 self.meshes.len() - 1
             }
         };
@@ -68,21 +88,17 @@ impl Scene {
         MeshID::new(self.id, index)
     }
 
-    pub fn remove_mesh<M: MeshBase>(&mut self, mesh: MeshID<M>) -> Box<M> {
-        assert_eq!(self.id, mesh.scene_id);
+    pub fn remove_mesh<M>(&mut self, mesh_id: MeshID<M>) {
+        assert_eq!(self.id, mesh_id.scene_id);
 
-        let box_ = self.meshes.get_mut(mesh.index).unwrap().take().unwrap();
-        self.mesh_recycle_ids.push(mesh.index);
-
-        debug_assert!(box_.as_any().is::<M>());
-
-        unsafe {
-            let raw = Box::into_raw(box_);
-            Box::from_raw(raw as *mut M)
-        }
+        self.meshes.get_mut(mesh_id.index).unwrap().take().unwrap();
+        self.mesh_recycle_ids.push(mesh_id.index);
     }
 
-    pub fn get_mesh_ref<M: MeshBase>(&self, mesh: &MeshID<M>) -> &M {
+    pub fn get_mesh_ref<M>(&self, mesh: &MeshID<M>) -> &M
+    where
+        M: MeshBase + 'static,
+    {
         assert_eq!(self.id, mesh.scene_id);
 
         self.meshes
@@ -91,11 +107,14 @@ impl Scene {
             .as_ref()
             .unwrap()
             .as_any()
-            .downcast_ref::<M>()
+            .downcast_ref()
             .unwrap()
     }
 
-    pub fn get_mesh_mut<M: MeshBase>(&mut self, mesh: &MeshID<M>) -> &mut M {
+    pub fn get_mesh_mut<M>(&mut self, mesh: &MeshID<M>) -> &mut M
+    where
+        M: MeshBase + 'static,
+    {
         assert_eq!(self.id, mesh.scene_id);
 
         self.meshes
@@ -104,18 +123,7 @@ impl Scene {
             .as_mut()
             .unwrap()
             .as_any_mut()
-            .downcast_mut::<M>()
+            .downcast_mut()
             .unwrap()
-    }
-}
-
-impl Default for Scene {
-    fn default() -> Self {
-        Self {
-            id: SCENE_COUNTER.fetch_add(1, Ordering::Relaxed),
-            background: wgpu::Color::WHITE,
-            meshes: Vec::new(),
-            mesh_recycle_ids: Vec::new(),
-        }
     }
 }
